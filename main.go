@@ -91,7 +91,7 @@ func buildTarget(
 
 	d, err := FreezeTarget(root, newHash, cache, t)
 	if err != nil {
-		return errors.Wrap(err, "Freezing target")
+		return errors.Wrapf(err, "Freezing target '%s'", t.Name)
 	}
 
 	if err := BuildRecursive(cache, d, tmpDirBase); err != nil {

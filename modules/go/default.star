@@ -30,7 +30,7 @@ def test(goTool, name, dependencies, sources):
             cd "$cachePath/${Sources}"
             GOCACHE="$cachePath/${Dependencies}/gocache" \
                 GOPATH="$cachePath/${Dependencies}/gopath" \
-                ${GoTool} test -v | tee $out
+                $cachePath/${GoTool} test -v | tee $out
             """,
             GoTool = goTool,
             Sources = sources,
@@ -73,7 +73,7 @@ def build(goTool, name, dependencies, sources):
             cd "$cachePath/${Sources}"
             GOCACHE="$cachePath/${Dependencies}/gocache" \
                 GOPATH="$cachePath/${Dependencies}/gopath" \
-                ${GoTool} build -o $out
+                $cachePath/${GoTool} build -o $out
             """,
             GoTool = goTool,
             Sources = sources,
@@ -100,7 +100,7 @@ def dependencies(goTool, name, moduleRoot):
                 cd "$cachePath/${GoModSum}" && \
                 GOPATH="$cachePath/${Dependencies}/state/gopath" \
                 GOCACHE="$cachePath/${Dependencies}/cache" \
-                ${GoTool} mod download
+                $cachePath/${GoTool} mod download
             )
             mv state $out
             """,

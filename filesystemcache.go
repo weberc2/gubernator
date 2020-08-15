@@ -49,7 +49,16 @@ func (fsc *FileSystemCache) NewDirEntry(
 						return err
 					}
 					defer properClose(file)
-					return callback(file)
+					mode, err := callback(file)
+					if err != nil {
+						return err
+					}
+					return errors.Wrapf(
+						file.Chmod(mode),
+						"chmod-ing file '%s' with permissions %s",
+						filePath,
+						mode.String(),
+					)
 				},
 			)
 		},
@@ -69,7 +78,17 @@ func (fsc *FileSystemCache) NewFileEntry(
 			}
 			defer properClose(file)
 
-			return cacheFileCallback(file)
+			mode, err := cacheFileCallback(file)
+			if err != nil {
+				return err
+			}
+
+			return errors.Wrapf(
+				file.Chmod(mode),
+				"chmod-ing file '%s' with permissions %s",
+				tmpPath,
+				mode.String(),
+			)
 		},
 		nameCallback,
 	)
@@ -83,10 +102,10 @@ func (fsc *FileSystemCache) MoveFile(src, dst string) error {
 	if err := os.Rename(src, filepath.Join(fsc.root, dst)); err != nil {
 		return errors.Wrapf(
 			fsc.NewFileEntry(
-				func(w io.Writer) error {
+				func(w io.Writer) (os.FileMode, error) {
 					file, err := os.Open(src)
 					if err != nil {
-						return errors.Wrapf(
+						return 0, errors.Wrapf(
 							err,
 							"Opening source file: %s",
 							src,
@@ -102,7 +121,7 @@ func (fsc *FileSystemCache) MoveFile(src, dst string) error {
 					}()
 
 					if _, err := io.Copy(w, file); err != nil {
-						return errors.Wrapf(
+						return 0, errors.Wrapf(
 							err,
 							"Copying source file: %s",
 							src,
@@ -110,7 +129,7 @@ func (fsc *FileSystemCache) MoveFile(src, dst string) error {
 					}
 
 					if err := file.Close(); err != nil {
-						return errors.Wrapf(
+						return 0, errors.Wrapf(
 							err,
 							"Closing source file: %s",
 							src,
@@ -118,7 +137,12 @@ func (fsc *FileSystemCache) MoveFile(src, dst string) error {
 					}
 					fileClosed = true
 
-					return errors.Wrapf(
+					fi, err := file.Stat()
+					if err != nil {
+						return 0, err
+					}
+
+					return fi.Mode(), errors.Wrapf(
 						os.RemoveAll(src),
 						"Removing source file: %s",
 						src,
@@ -165,6 +189,10 @@ func (fsc *FileSystemCache) withTmpArtifact(
 
 	// commit artifact to cache
 	cachePath := filepath.Join(fsc.root, nameCallback())
+	parentDir := filepath.Dir(cachePath)
+	if err := os.MkdirAll(parentDir, 0744); err != nil {
+		return errors.Wrapf(err, "Creating parent directory %s", parentDir)
+	}
 	if err := os.Rename(tmpPath, cachePath); err != nil {
 		if os.IsExist(err) {
 			if err := os.RemoveAll(cachePath); err != nil {

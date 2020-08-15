@@ -44,7 +44,7 @@ func freezeTarget(f *freezer, t *Target) (*Derivation, []byte, error) {
 	for i, arg := range t.Args {
 		argValue, err := arg.freezeArg(f)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, errors.Wrapf(err, "Freezing argument '%s'", arg)
 		}
 
 		dependencies = append(dependencies, argValue.Derivations...)
@@ -86,14 +86,12 @@ func (s String) freezeArg(f *freezer) (ArgValue, error) {
 }
 
 func (p Path) freezeArg(f *freezer) (ArgValue, error) {
-	absPath := filepath.Join(f.packageRoot, string(p))
 	hasher := f.newHasher()
-	hasher.Write([]byte(p)) // hash the path relative to the package root
 	cachePath := func() string {
 		return filepath.Join(hex.EncodeToString(hasher.Sum(nil)), string(p))
 	}
 	if err := f.cache.NewFileEntry(
-		hashFile(absPath, hasher),
+		hashFile(f.packageRoot, string(p), hasher),
 		cachePath,
 	); err != nil {
 		return ArgValue{}, err
@@ -124,7 +122,7 @@ func (gg GlobGroup) freezeArg(f *freezer) (ArgValue, error) {
 
 				if err := registerFile(
 					relPath,
-					hashFile(path, hasher),
+					hashFile(f.packageRoot, relPath, hasher),
 				); err != nil {
 					return err
 				}
@@ -165,16 +163,29 @@ func (gg GlobGroup) matches(packageRoot string) ([]string, error) {
 	return paths, nil
 }
 
-func hashFile(absPath string, hasher hash.Hash) CacheFileCallback {
-	return func(w io.Writer) error {
-		f, err := os.Open(absPath)
+func hashFile(root, relPath string, hasher hash.Hash) CacheFileCallback {
+	return func(w io.Writer) (os.FileMode, error) {
+		f, err := os.Open(filepath.Join(root, relPath))
 		if err != nil {
-			return err
+			return 0, err
 		}
 		defer properClose(f)
 
+		fi, err := f.Stat()
+		if err != nil {
+			return 0, err
+		}
+		mode := fi.Mode()
+
+		hasher.Write([]byte(relPath))
+		hasher.Write([]byte{
+			byte(mode >> 6 & 0o007),
+			byte(mode >> 3 & 0o007),
+			byte(mode & 0o007),
+		})
+
 		_, err = io.Copy(w, &HashingReader{Reader: f, Hasher: hasher})
-		return err
+		return fi.Mode(), err
 	}
 }
 
@@ -186,7 +197,7 @@ func (s *Sub) freezeArg(f *freezer) (ArgValue, error) {
 	for _, substitution := range s.Substitutions {
 		value, err := substitution.Value.freezeArg(f)
 		if err != nil {
-			return ArgValue{}, err
+			return ArgValue{}, errors.Wrapf(err, "Freezing substitution '%s'", substitution.Key)
 		}
 		derivations = append(derivations, value.Derivations...)
 		hasher.Write([]byte(substitution.Key))

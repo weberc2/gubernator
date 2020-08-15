@@ -32,13 +32,14 @@ func (th *testHash) BlockSize() int { return len(th.output) }
 type entry interface{ entry() }
 
 type dirEntry struct {
-	files map[string]*bytes.Buffer
+	files map[string]*fileEntry
 }
 
 func (de *dirEntry) entry() {}
 
 type fileEntry struct {
-	buf bytes.Buffer
+	mode os.FileMode
+	buf  bytes.Buffer
 }
 
 func (fe *fileEntry) entry() {}
@@ -55,14 +56,15 @@ func (tc *testCache) NewDirEntry(
 	cacheDirCallback CacheDirCallback,
 	nameCallback NameCallback,
 ) error {
-	files := map[string]*bytes.Buffer{}
+	files := map[string]*fileEntry{}
 	if err := cacheDirCallback(
 		func(relpath string, callback CacheFileCallback) error {
-			buf := &bytes.Buffer{}
-			if err := callback(buf); err != nil {
+			var buf bytes.Buffer
+			mode, err := callback(&buf)
+			if err != nil {
 				return err
 			}
-			files[relpath] = buf
+			files[relpath] = &fileEntry{mode: mode, buf: buf}
 			return nil
 		},
 	); err != nil {
@@ -76,11 +78,12 @@ func (tc *testCache) NewFileEntry(
 	cacheFileCallback CacheFileCallback,
 	nameCallback NameCallback,
 ) error {
-	var entry fileEntry
-	if err := cacheFileCallback(&entry.buf); err != nil {
+	var buf bytes.Buffer
+	mode, err := cacheFileCallback(&buf)
+	if err != nil {
 		return err
 	}
-	tc.entries[nameCallback()] = &entry
+	tc.entries[nameCallback()] = &fileEntry{mode: mode, buf: buf}
 	return nil
 }
 
@@ -445,6 +448,74 @@ func TestFreezeTarget_OneDependency(t *testing.T) {
 	}
 }
 
+func TestPathFreezeArg(t *testing.T) {
+	if err := withTempDir(func(dir string) error {
+		// Prepare test file
+		if err := ioutil.WriteFile(
+			filepath.Join(dir, "test"),
+			[]byte("hi!"),
+			0644,
+		); err != nil {
+			return errors.Wrap(err, "Unexpected error writing test file")
+		}
+
+		h := testHash{output: "hash"}
+		cache := newTestCache()
+
+		argValue, err := Path("test").freezeArg(&freezer{
+			packageRoot: dir,
+			newHasher:   func() hash.Hash { return &h },
+			cache:       cache,
+		})
+		if err != nil {
+			return errors.Wrap(err, "Unexpected error freezing test file")
+		}
+
+		hashStr := h.Buffer.String()
+		if !strings.Contains(hashStr, "test") {
+			return errors.Errorf(
+				"Expected the hash to include the path ('test')",
+			)
+		}
+		if !strings.Contains(hashStr, string([]byte{6, 4, 4})) {
+			return errors.Errorf(
+				"Expected the hash to include the file mode bits (0644)",
+			)
+		}
+		if !strings.Contains(hashStr, "hi!") {
+			return errors.Errorf(
+				"Expected the hash to include the file body ('hi!')",
+			)
+		}
+
+		testEntry, found := cache.entries[argValue.Value]
+		if !found {
+			return errors.Errorf(
+				"Missing expected cache entry '%s'",
+				argValue.Value,
+			)
+		}
+		testFileEntry, ok := testEntry.(*fileEntry)
+		if !ok {
+			return errors.Errorf(
+				"Expected file entry at '%s'; found dir entry",
+				argValue.Value,
+			)
+		}
+		if actual := testFileEntry.mode; actual != 0644 {
+			return errors.Errorf(
+				"Expected %s mode 0644; found "+
+					"'%s'",
+				argValue.Value,
+				actual,
+			)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGlobGroupFreezeArg(t *testing.T) {
 	files := map[string][]byte{
 		"foo/bar": []byte("hello"),
@@ -524,14 +595,22 @@ func TestGlobGroupFreezeArg(t *testing.T) {
 		}
 
 		// Make sure the foo/bar file was grabbed properly
-		fooBarContents, found := entry.files["foo/bar"]
+		fooBarEntry, found := entry.files["foo/bar"]
 		if !found {
 			return errors.Errorf(
 				"Missing expected file in dir entry (key='%s'): foo/bar",
 				argValue.Value,
 			)
 		}
-		if actual := fooBarContents.String(); actual != "hello" {
+		if actual := fooBarEntry.mode; actual != 0644 {
+			return errors.Errorf(
+				"In cache dir entry '%s': Expected foo/bar mode 0644; found "+
+					"'%s'",
+				argValue.Value,
+				actual,
+			)
+		}
+		if actual := fooBarEntry.buf.String(); actual != "hello" {
 			return errors.Errorf(
 				"In cache dir entry '%s': Expected foo/bar contents "+
 					"'hello'; found '%s'",
@@ -541,14 +620,22 @@ func TestGlobGroupFreezeArg(t *testing.T) {
 		}
 
 		// Make sure the foo/baz file was grabbed properly
-		fooBazContents, found := entry.files["foo/baz"]
+		fooBazEntry, found := entry.files["foo/baz"]
 		if !found {
 			return errors.Errorf(
 				"Missing expected file in dir entry (key='%s'): foo/baz",
 				argValue.Value,
 			)
 		}
-		if actual := fooBazContents.String(); actual != "world" {
+		if actual := fooBazEntry.mode; actual != 0644 {
+			return errors.Errorf(
+				"In cache dir entry '%s': Expected foo/bar mode 0644; found "+
+					"'%s'",
+				argValue.Value,
+				actual,
+			)
+		}
+		if actual := fooBazEntry.buf.String(); actual != "world" {
 			return errors.Errorf(
 				"In cache dir entry '%s': Expected foo/baz contents "+
 					"'world'; found '%s'",

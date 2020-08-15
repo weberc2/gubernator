@@ -2,9 +2,10 @@ package main
 
 import (
 	"io"
+	"os"
 )
 
-type CacheFileCallback func(io.Writer) error
+type CacheFileCallback func(io.Writer) (os.FileMode, error)
 
 type CacheDir func(relpath string, callback CacheFileCallback) error
 

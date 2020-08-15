@@ -55,7 +55,7 @@ func BuildRecursive(
 // distributions seem to put the tmp dir on a tmpfs file system and
 // consequently an explicit tmpDirBase value must be passed).
 func Build(fsc *FileSystemCache, d *Derivation, tmpDirBase string) error {
-	var stderr bytes.Buffer
+	var output bytes.Buffer
 
 	tmpDir, err := ioutil.TempDir(tmpDirBase, "*")
 	if err != nil {
@@ -80,14 +80,10 @@ func Build(fsc *FileSystemCache, d *Derivation, tmpDirBase string) error {
 	envCopy[len(envCopy)-2] = "cachePath=" + fsc.Root()
 	cmd.Env = envCopy
 	cmd.Dir = tmpDir
-	if debug := false; debug { // true for debug; false for normal
-		cmd.Stdout = os.Stdout
-	} else {
-		cmd.Stdout = ioutil.Discard
-	}
-	cmd.Stderr = &stderr
+	cmd.Stderr = &output
+	cmd.Stdout = &output
 	if err := cmd.Run(); err != nil {
-		return errors.Wrapf(err, "STDERR: '%s'", stderr.String())
+		return errors.Wrapf(err, "OUTPUT: '%s'", &output)
 	}
 
 	// Builder exited OK; move the output file into the cache. If the output
