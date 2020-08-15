@@ -1,0 +1,24 @@
+
+## Progress
+
+* Created a GlobGroup because it's going to be necessary to put multiple files
+  into a single directory in the cache (and it doesn't suffice to grab a whole
+  directory because we'll often want to ignore various files in the tree).
+
+* Added support for "packages" in a package directory ".vendor" to support some
+  notion of reusability at the Starlark level. In the future this will evolve
+  into something like Go modules (where the tool can resolve and fetch
+  dependencies over the network); however, for now, the intention is to have
+  users manage their own .vendor directories.
+
+* I've been informally testing this by creating toy packages in the .vendor
+  directory (.vendor/go and .vendor/helpers)
+
+## TODO
+
+* Create dedicated repository
+* Migrate this TODO list to issues and milestones
+* Set up CI with unit tests and self-hosted build
+* End-to-end tests (create various test case directory structures and assert
+  that the build cache contains the right things?)
+* Make sure builders run with read-only access to cache
