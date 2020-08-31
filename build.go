@@ -86,6 +86,11 @@ func Build(fsc *FileSystemCache, d *Derivation, tmpDirBase string) error {
 		return errors.Wrapf(err, "OUTPUT: '%s'", &output)
 	}
 
+	// Make the artifact immutable before moving it into the cache.
+	if err := makeImmutable(tmpOutPath); err != nil {
+		return errors.Wrap(err, "Chmodding output artifact")
+	}
+
 	// Builder exited OK; move the output file into the cache. If the output
 	// file doesn't exist, report a distinct error.
 	if err := fsc.MoveFile(tmpOutPath, d.ID); err != nil {
@@ -98,4 +103,39 @@ func Build(fsc *FileSystemCache, d *Derivation, tmpDirBase string) error {
 	}
 
 	return nil
+}
+
+func makeImmutable(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return makeImmutableHelper(path, fi)
+}
+
+func makeImmutableHelper(path string, fi os.FileInfo) error {
+	if fi.IsDir() {
+		files, err := ioutil.ReadDir(path)
+		if err != nil {
+			return err
+		}
+
+		for _, file := range files {
+			if err := makeImmutableHelper(
+				filepath.Join(path, file.Name()),
+				file,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	// ^os.FileMode(0b111111111) creates a bitmask that has all 1s followed by
+	// 9 zeros. This works regardless of 32-bit vs 64-bit. Then we OR that mask
+	// with the lower 9 bits 0b101_101_101 which is a mask which prevents
+	// writing (it allows reading and executing). The higher N bits must be set
+	// to `1` to avoid overwriting valuable information such as the directory
+	// bit.
+	const immutableMask = ^os.FileMode(0b111111111) | 0b101101101
+	return os.Chmod(path, fi.Mode()&immutableMask)
 }
